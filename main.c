@@ -110,10 +110,6 @@ int main(int argc, char const* argv[]) {
     const pid_t process_id = getpid();
     EchoDatagram datagram = { .transparent.process_id = process_id };
 
-    fd_set select_descriptors;
-    FD_ZERO(&select_descriptors);
-    FD_SET(socket_descriptor, &select_descriptors);
-
     bool reached_target = false;
 
     for (uint8_t turn_index = 0; turn_index < TURNS && !reached_target;
@@ -132,6 +128,9 @@ int main(int argc, char const* argv[]) {
             return EXIT_FAILURE;
         }
 
+        fd_set select_descriptors;
+        FD_ZERO(&select_descriptors);
+        FD_SET(socket_descriptor, &select_descriptors);
         Time time = { .tv_sec = 1, .tv_usec = 0 };
 
         uint8_t packets_received = 0;
