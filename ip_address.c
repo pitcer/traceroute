@@ -1,10 +1,14 @@
+/*
+ * Piotr Dobiech 316625
+ */
+
 #include "ip_address.h"
 
 #include "config.h"
-#include <arpa/inet.h>
 #include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 
 static inline bool is_numeric(const char character) {
     return character >= '0' && character <= '9';
@@ -50,6 +54,13 @@ bool validate_address(const char* address) {
     }
 
     return true;
+}
+
+inline int ip_string_to_bytes(
+    const char* string_address, InetSocketAddress* address) {
+    memset(address, 0, sizeof(*address));
+    address->sin_family = AF_INET;
+    return inet_pton(AF_INET, string_address, &address->sin_addr);
 }
 
 inline void print_adddress(uint32_t address) {

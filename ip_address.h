@@ -1,13 +1,23 @@
+/*
+ * Piotr Dobiech 316625
+ */
+
 #pragma once
 
 #include "config.h"
+#include <arpa/inet.h>
 #include <inttypes.h>
 #include <stdbool.h>
 
 // 3 + 1 + 3 + 1 + 3 + 1 + 3
 #define MAX_IP_ADDRESS_LENGTH 15
 
+typedef struct sockaddr_in InetSocketAddress;
+typedef struct sockaddr SocketAddress;
+
 bool validate_address(const char* address);
+
+int ip_string_to_bytes(const char* string_address, InetSocketAddress* address);
 
 void print_adddress(uint32_t address);
 

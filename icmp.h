@@ -1,3 +1,7 @@
+/*
+ * Piotr Dobiech 316625
+ */
+
 #pragma once
 
 #include "config.h"

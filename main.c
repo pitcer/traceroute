@@ -6,11 +6,8 @@
 #include "ip_address.h"
 #include "utils.h"
 
-#include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
-#include <inttypes.h>
-#include <netinet/ip.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,47 +16,37 @@
 static_assert(TURNS <= MAX_TURNS);
 static_assert(PACKETS_IN_TURN <= MAX_PACKETS_IN_TURN);
 
-typedef struct sockaddr_in InetSocketAddress;
-typedef struct sockaddr SocketAddress;
-
-typedef struct {
-    uint32_t socket_descriptor;
-    union {
-        InetSocketAddress* inet_recipient;
-        SocketAddress* recipient;
-    };
-
-} TracerouteContext;
-
 #define MICROS_IN_SECOND 1000000
 
-static inline void set_ttl(
-    const TracerouteContext* context, const uint8_t* ttl) {
-    setsockopt(
-        context->socket_descriptor, IPPROTO_IP, IP_TTL, ttl, sizeof(uint8_t));
+typedef struct timeval Time;
+
+static inline int set_ttl(const int socket_descriptor, const uint8_t* ttl) {
+    return setsockopt(
+        socket_descriptor, IPPROTO_IP, IP_TTL, ttl, sizeof(uint8_t));
 }
 
-static inline ssize_t receive_packet(const TracerouteContext* context,
-    uint8_t* buffer, InetSocketAddress* sender) {
+static inline ssize_t receive_packet(
+    const int socket_descriptor, uint8_t* buffer, InetSocketAddress* sender) {
     socklen_t socket_length;
-    return recvfrom(context->socket_descriptor, buffer, IP_MAXPACKET,
-        MSG_DONTWAIT, (struct sockaddr*)sender, &socket_length);
+    return recvfrom(socket_descriptor, buffer, IP_MAXPACKET, MSG_DONTWAIT,
+        (struct sockaddr*)sender, &socket_length);
 }
 
-static inline ssize_t send_packet(
-    const TracerouteContext* context, IcmpHeader* buffer) {
-    return sendto(context->socket_descriptor, buffer, sizeof(*buffer), 0,
-        context->recipient, sizeof(*context->inet_recipient));
+static inline ssize_t send_packet(const int socket_descriptor,
+    const InetSocketAddress* recipient, IcmpHeader* buffer) {
+    return sendto(socket_descriptor, buffer, sizeof(*buffer), 0,
+        (SocketAddress*)recipient, sizeof(*recipient));
 }
 
-static inline bool send_echo_packets(
-    const TracerouteContext* context, EchoDatagram datagram) {
+static inline bool send_echo_packets(const int socket_descriptor,
+    const InetSocketAddress* recipient, EchoDatagram datagram) {
     for (uint8_t index = 0; index < PACKETS_IN_TURN; index++) {
         IcmpHeader header;
         datagram.transparent.turn_packet_index = index;
         fill_icmp_echo_header(&header, &datagram);
 
-        const ssize_t result = send_packet(context, &header);
+        const ssize_t result
+            = send_packet(socket_descriptor, recipient, &header);
         if (result < 0) {
             return false;
         }
@@ -106,39 +93,46 @@ int main(int argc, char const* argv[]) {
         return EXIT_FAILURE;
     }
 
+    InetSocketAddress recipient;
+    int ip_string_to_bytes_result
+        = ip_string_to_bytes(target_address, &recipient);
+    if (ip_string_to_bytes_result == 0) {
+        eprintln("inet_pton error: given address does not contain a character "
+                 "string representing a valid network address in the AF_INET "
+                 "address family.");
+        return EXIT_FAILURE;
+    }
+    if (ip_string_to_bytes_result < 0) {
+        eprintln("inet_pton error: %s", strerror(errno));
+        return EXIT_FAILURE;
+    }
+
+    const pid_t process_id = getpid();
+    EchoDatagram datagram = { .transparent.process_id = process_id };
+
     fd_set select_descriptors;
     FD_ZERO(&select_descriptors);
     FD_SET(socket_descriptor, &select_descriptors);
 
-    InetSocketAddress recipient;
-    bzero(&recipient, sizeof(recipient));
-    recipient.sin_family = AF_INET;
-    inet_pton(AF_INET, target_address, &recipient.sin_addr);
-    const uint32_t receipient_address = recipient.sin_addr.s_addr;
-
-    const TracerouteContext context = { .socket_descriptor = socket_descriptor,
-        .inet_recipient = &recipient };
-
-    const pid_t process_id = getpid();
-
     bool reached_target = false;
 
-    for (uint8_t ttl = 1; ttl <= TURNS && !reached_target; ttl++) {
+    for (uint8_t turn_index = 0; turn_index < TURNS && !reached_target;
+         turn_index++) {
+        const uint8_t ttl = turn_index + 1;
         printf("%2." PRIu32 ". ", ttl);
 
-        set_ttl(&context, &ttl);
+        if (set_ttl(socket_descriptor, &ttl) < 0) {
+            eprintln("setsockopt error: %s", strerror(errno));
+            return EXIT_FAILURE;
+        }
+        datagram.transparent.turn_index = turn_index;
 
-        EchoDatagram datagram = { .transparent.process_id = process_id,
-            .transparent.turn_index = ttl,
-            .transparent.turn_packet_index = 0 };
-        if (!send_echo_packets(&context, datagram)) {
+        if (!send_echo_packets(socket_descriptor, &recipient, datagram)) {
             eprintln("sendto error: %s", strerror(errno));
             return EXIT_FAILURE;
         }
 
-        struct timeval time;
-        time.tv_sec = 1;
-        time.tv_usec = 0;
+        Time time = { .tv_sec = 1, .tv_usec = 0 };
 
         uint8_t packets_received = 0;
         uint32_t senders_addresses[PACKETS_IN_TURN];
@@ -160,9 +154,7 @@ int main(int argc, char const* argv[]) {
                 InetSocketAddress sender;
                 uint8_t buffer[IP_MAXPACKET];
 
-                const ssize_t packet_length
-                    = receive_packet(&context, buffer, &sender);
-                if (packet_length < 0) {
+                if (receive_packet(socket_descriptor, buffer, &sender) < 0) {
                     eprintln("recvfrom error: %s", strerror(errno));
                     return EXIT_FAILURE;
                 }
@@ -177,15 +169,14 @@ int main(int argc, char const* argv[]) {
                     icmp_header = extract_sent_icmp_header(icmp_header);
                 }
 
-                const EchoDatagram datagram
-                    = (EchoDatagram)icmp_header->icmp_void;
+                EchoDatagram datagram = (EchoDatagram)icmp_header->icmp_void;
                 if (datagram.transparent.process_id != process_id
-                    || datagram.transparent.turn_index != ttl) {
+                    || datagram.transparent.turn_index != turn_index) {
                     continue;
                 }
 
                 if (response_type == ICMP_ECHOREPLY
-                    && receipient_address == sender_address) {
+                    && recipient.sin_addr.s_addr == sender_address) {
                     reached_target = true;
                 }
 
@@ -201,6 +192,10 @@ int main(int argc, char const* argv[]) {
         return EXIT_FAILURE;
     }
 
-    close(socket_descriptor);
+    if (close(socket_descriptor) < 0) {
+        eprintln("close error: %s", strerror(errno));
+        return EXIT_FAILURE;
+    }
+
     return EXIT_SUCCESS;
 }

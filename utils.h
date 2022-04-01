@@ -1,3 +1,7 @@
+/*
+ * Piotr Dobiech 316625
+ */
+
 #pragma once
 
 #define println(format, ...) printf(format "\n" __VA_OPT__(, ) __VA_ARGS__)
