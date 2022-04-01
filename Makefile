@@ -1,3 +1,5 @@
+# Piotr Dobiech 316625
+
 CC = gcc
 CFLAGS = -std=gnu17 -Wall -Wextra
 
