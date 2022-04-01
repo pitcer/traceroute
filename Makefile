@@ -1,11 +1,18 @@
-traceroute: main.o
-	gcc -Wall -Wextra -std=gnu17 -o traceroute main.o
+CC = gcc
+CFLAGS = -std=gnu17 -Wall -Wextra
 
-main.o: main.c
-	gcc -Wall -Wextra -std=gnu17 -c main.c
+BINARY_NAME := traceroute
+SRCS := ip_address.c icmp.c main.c
+OBJS := $(SRCS:%.c=%.o)
+
+$(BINARY_NAME): $(OBJS)
+	$(CC) $(OBJS) -o $@
+
+%.o: %.c
+	$(CC) -c $(CFLAGS) $< -o $@
 
 clean:
-	rm main.o
+	rm $(OBJS)
 
 cleandist:
-	rm main.o traceroute
+	rm $(OBJS) $(BINARY_NAME)
