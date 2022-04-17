@@ -82,7 +82,7 @@ int main(int argc, char const* argv[]) {
     }
 
     const char* target_address = argv[1];
-    if (!validate_address(target_address)) {
+    if (!validate_address(target_address)) { //
         eprintln("Invalid target IP address: %s", target_address);
         return EXIT_FAILURE;
     }
@@ -128,9 +128,6 @@ int main(int argc, char const* argv[]) {
             return EXIT_FAILURE;
         }
 
-        fd_set select_descriptors;
-        FD_ZERO(&select_descriptors);
-        FD_SET(socket_descriptor, &select_descriptors);
         Time time = { .tv_sec = 1, .tv_usec = 0 };
 
         uint8_t packets_received = 0;
@@ -138,6 +135,9 @@ int main(int argc, char const* argv[]) {
         uint32_t elapsed_time_sum = 0;
 
         while (packets_received < PACKETS_IN_TURN) {
+            fd_set select_descriptors;
+            FD_ZERO(&select_descriptors);
+            FD_SET(socket_descriptor, &select_descriptors);
             int ready = select(
                 socket_descriptor + 1, &select_descriptors, NULL, NULL, &time);
             if (ready < 0) {
@@ -175,8 +175,10 @@ int main(int argc, char const* argv[]) {
                 }
 
                 if (response_type == ICMP_ECHOREPLY
-                    && recipient.sin_addr.s_addr == sender_address) {
+                    /* && recipient.sin_addr.s_addr == sender_address */) {
                     reached_target = true;
+                } else {
+                    continue;
                 }
 
                 packets_received++;
@@ -191,10 +193,10 @@ int main(int argc, char const* argv[]) {
         return EXIT_FAILURE;
     }
 
-    if (close(socket_descriptor) < 0) {
-        eprintln("close error: %s", strerror(errno));
-        return EXIT_FAILURE;
-    }
+    // if (close(socket_descriptor) < 0) {
+    //     eprintln("close error: %s", strerror(errno));
+    //     return EXIT_FAILURE;
+    // }
 
     return EXIT_SUCCESS;
 }
